@@ -42,6 +42,12 @@
             width: 100%;
             height: 100%;
             object-fit: cover; /* Ensures the aspect ratio is maintained while filling the screen */
+            transition: transform 0.1s ease-out; /* Smooth zooming and shifting */
+        }
+        
+        /* Range slider styling */
+        input[type=range] {
+            accent-color: #3b82f6;
         }
     </style>
 </head>
@@ -61,6 +67,43 @@
         </button>
     </div>
 
+    <!-- Settings UI overlay (Hidden initially) -->
+    <div id="settings-ui" class="hidden absolute z-50 flex-col items-center justify-center bg-black/90 w-full h-full p-6 text-center">
+        <h2 class="text-2xl font-bold mb-6">VR Settings</h2>
+        
+        <div class="w-full max-w-xs space-y-6">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1 flex justify-between">
+                    <span>Zoom</span>
+                    <span id="zoom-val">1.0x</span>
+                </label>
+                <input type="range" id="zoom-slider" min="1" max="5" step="0.1" value="1" class="w-full">
+            </div>
+            
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1 flex justify-between">
+                    <span>Eye Separation (IPD)</span>
+                    <span id="ipd-val">0</span>
+                </label>
+                <input type="range" id="ipd-slider" min="-50" max="50" step="1" value="0" class="w-full">
+            </div>
+
+            <div class="flex flex-col space-y-3 pt-4">
+                <button id="fullscreen-btn" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow">
+                    Toggle Full Screen
+                </button>
+                
+                <button id="close-settings-btn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-lg shadow">
+                    Resume VR
+                </button>
+
+                <button id="exit-vr-btn" class="bg-red-900 hover:bg-red-800 text-white font-bold py-3 px-6 rounded-lg shadow mt-2">
+                    Exit VR
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Dual Camera Viewers -->
     <div id="vr-container" class="hidden">
         <div class="eye">
@@ -77,11 +120,30 @@
         const startUi = document.getElementById('start-ui');
         const vrContainer = document.getElementById('vr-container');
         
+        const settingsUi = document.getElementById('settings-ui');
+        const zoomSlider = document.getElementById('zoom-slider');
+        const zoomVal = document.getElementById('zoom-val');
+        const ipdSlider = document.getElementById('ipd-slider');
+        const ipdVal = document.getElementById('ipd-val');
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        const closeSettingsBtn = document.getElementById('close-settings-btn');
+        const exitVrBtn = document.getElementById('exit-vr-btn');
+        
         const leftEye = document.getElementById('left-eye');
         const rightEye = document.getElementById('right-eye');
 
         let currentStream = null;
         let useFrontCamera = false;
+        let currentZoom = 1.0;
+        let currentIpd = 0;
+
+        // Function to update video transformations (Zoom, IPD, and Flip)
+        function updateVideoTransforms() {
+            let scaleX = useFrontCamera ? -1 : 1;
+            // Left eye shifts left (-ipd), right eye shifts right (+ipd)
+            leftEye.style.transform = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${-currentIpd}px)`;
+            rightEye.style.transform = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${currentIpd}px)`;
+        }
 
         // Function to start the camera stream
         async function startCamera() {
@@ -111,14 +173,13 @@
                 vrContainer.classList.remove('hidden');
                 vrContainer.style.display = 'flex';
 
-                // If using front camera, mirror the video horizontally so it feels natural
-                if (useFrontCamera) {
-                    leftEye.style.transform = 'scaleX(-1)';
-                    rightEye.style.transform = 'scaleX(-1)';
-                } else {
-                    leftEye.style.transform = 'scaleX(1)';
-                    rightEye.style.transform = 'scaleX(1)';
+                // Automatically attempt to enter fullscreen on start
+                if (!document.fullscreenElement) {
+                    document.documentElement.requestFullscreen().catch(err => console.log("Fullscreen ignored:", err));
                 }
+
+                // Apply initial dynamic transformations
+                updateVideoTransforms();
 
             } catch (err) {
                 console.error("Error accessing the camera: ", err);
@@ -134,9 +195,60 @@
             startBtn.innerText = useFrontCamera ? "Start Camera (Front)" : "Start Camera (Rear)";
         });
 
-        // Tap screen to show/hide the start menu if you need to exit VR mode
+        // --- Settings Menu Logic ---
+
+        // Zoom control
+        zoomSlider.addEventListener('input', (e) => {
+            currentZoom = parseFloat(e.target.value);
+            zoomVal.innerText = currentZoom.toFixed(1) + 'x';
+            updateVideoTransforms();
+        });
+
+        // IPD (Eye Distance) control
+        ipdSlider.addEventListener('input', (e) => {
+            currentIpd = parseInt(e.target.value);
+            ipdVal.innerText = currentIpd;
+            updateVideoTransforms();
+        });
+
+        // Fullscreen toggle
+        fullscreenBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => console.error(err));
+            } else {
+                document.exitFullscreen();
+            }
+        });
+
+        // Close Settings menu and resume VR
+        closeSettingsBtn.addEventListener('click', () => {
+            settingsUi.classList.add('hidden');
+            settingsUi.classList.remove('flex');
+        });
+
+        // Completely exit VR mode and turn off camera
+        exitVrBtn.addEventListener('click', () => {
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(err => console.log(err));
+            }
+            settingsUi.classList.add('hidden');
+            settingsUi.classList.remove('flex');
+            
+            vrContainer.classList.add('hidden');
+            vrContainer.style.display = 'none';
+            
+            startUi.classList.remove('hidden');
+            
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+                currentStream = null;
+            }
+        });
+
+        // Tap the VR screen to open the hidden settings menu
         vrContainer.addEventListener('click', () => {
-            startUi.classList.toggle('hidden');
+            settingsUi.classList.remove('hidden');
+            settingsUi.classList.add('flex');
         });
     </script>
 </body>
