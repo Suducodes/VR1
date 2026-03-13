@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VR SBS Camera Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            overflow: hidden; /* Prevent scrolling */
+        }
+
+        /* Container for the split view */
+        #vr-container {
+            display: none; /* Hidden until camera starts */
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: row;
+        }
+
+        /* Each eye takes up exactly 50% of the screen */
+        .eye {
+            width: 50%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            border-right: 2px solid #111; /* Slight divider in the middle */
+        }
+
+        .eye:last-child {
+            border-right: none;
+        }
+
+        /* Video element styling to fill the eye container */
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* Ensures the aspect ratio is maintained while filling the screen */
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center font-sans text-white">
+
+    <!-- Start UI overlay -->
+    <div id="start-ui" class="absolute z-50 flex flex-col items-center justify-center bg-black/80 w-full h-full p-6 text-center">
+        <h1 class="text-3xl font-bold mb-4">VR Camera Viewer</h1>
+        <p class="text-gray-400 mb-8 max-w-md">Place your phone in a VR headset. Tap the button below to allow camera access and start the side-by-side stream.</p>
+        
+        <button id="start-btn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-8 rounded-full shadow-lg transition-all transform hover:scale-105">
+            Start Camera (Rear)
+        </button>
+
+        <button id="switch-btn" class="mt-4 text-sm text-gray-500 underline hover:text-white">
+            Switch to Front Camera
+        </button>
+    </div>
+
+    <!-- Dual Camera Viewers -->
+    <div id="vr-container" class="hidden">
+        <div class="eye">
+            <video id="left-eye" autoplay playsinline></video>
+        </div>
+        <div class="eye">
+            <video id="right-eye" autoplay playsinline></video>
+        </div>
+    </div>
+
+    <script>
+        const startBtn = document.getElementById('start-btn');
+        const switchBtn = document.getElementById('switch-btn');
+        const startUi = document.getElementById('start-ui');
+        const vrContainer = document.getElementById('vr-container');
+        
+        const leftEye = document.getElementById('left-eye');
+        const rightEye = document.getElementById('right-eye');
+
+        let currentStream = null;
+        let useFrontCamera = false;
+
+        // Function to start the camera stream
+        async function startCamera() {
+            // Stop existing stream if switching
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            const constraints = {
+                video: {
+                    facingMode: useFrontCamera ? "user" : "environment",
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 }
+                }
+            };
+
+            try {
+                // Request camera access
+                currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                
+                // Feed the stream to both video elements
+                leftEye.srcObject = currentStream;
+                rightEye.srcObject = currentStream;
+
+                // Hide the UI and show the VR split screen
+                startUi.classList.add('hidden');
+                vrContainer.classList.remove('hidden');
+                vrContainer.style.display = 'flex';
+
+                // If using front camera, mirror the video horizontally so it feels natural
+                if (useFrontCamera) {
+                    leftEye.style.transform = 'scaleX(-1)';
+                    rightEye.style.transform = 'scaleX(-1)';
+                } else {
+                    leftEye.style.transform = 'scaleX(1)';
+                    rightEye.style.transform = 'scaleX(1)';
+                }
+
+            } catch (err) {
+                console.error("Error accessing the camera: ", err);
+                alert("Could not access the camera. Please make sure you have granted permission.");
+            }
+        }
+
+        // Event Listeners
+        startBtn.addEventListener('click', startCamera);
+        
+        switchBtn.addEventListener('click', () => {
+            useFrontCamera = !useFrontCamera;
+            startBtn.innerText = useFrontCamera ? "Start Camera (Front)" : "Start Camera (Rear)";
+        });
+
+        // Tap screen to show/hide the start menu if you need to exit VR mode
+        vrContainer.addEventListener('click', () => {
+            startUi.classList.toggle('hidden');
+        });
+    </script>
+</body>
+</html>
