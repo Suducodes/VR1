@@ -10,54 +10,51 @@
             margin: 0;
             padding: 0;
             width: 100%;
-            height: 100dvh; /* Using dynamic viewport height */
+            height: 100dvh; 
             background-color: #000;
-            overflow: hidden; /* Prevent scrolling */
-            touch-action: none; /* Prevents pull-to-refresh on mobile */
+            overflow: hidden; 
+            touch-action: none; 
         }
 
-        /* Container for the split view */
         #vr-container {
-            display: none; /* Hidden until camera starts */
+            display: none; 
             position: fixed; 
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
             width: 100vw;
-            height: 100dvh; /* Dynamic viewport height fallback */
+            height: 100dvh; 
             display: flex;
             flex-direction: row;
             align-items: stretch;
             background-color: #000;
         }
 
-        /* Each eye takes up exactly half */
+        /* Flexbox centers the video if we constrain the aspect ratio */
         .eye {
-            flex: 1; /* Automatically takes exactly 50% */
+            flex: 1; 
             height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             position: relative;
             overflow: hidden;
-            border-right: 2px solid #111; /* Slight divider in the middle */
+            border-right: 2px solid #111; 
         }
 
         .eye:last-child {
             border-right: none;
         }
 
-        /* Video element styling to fill the eye container */
         video {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover !important; /* Forces the video to fill the space without letterboxing */
-            transition: transform 0.1s ease-out; /* Smooth zooming and shifting */
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: cover !important; 
+            transition: transform 0.1s ease-out; 
             transform-origin: center center;
         }
         
-        /* Range slider styling */
         input[type=range] {
             accent-color: #3b82f6;
         }
@@ -80,10 +77,24 @@
     </div>
 
     <!-- Settings UI overlay (Hidden initially) -->
-    <div id="settings-ui" class="hidden absolute z-50 flex-col items-center justify-center bg-black/90 w-full h-full p-6 text-center">
+    <div id="settings-ui" class="hidden absolute z-50 flex-col items-center justify-center bg-black/95 w-full h-full p-6 text-center">
         <h2 class="text-2xl font-bold mb-6">VR Settings</h2>
         
         <div class="w-full max-w-xs space-y-6">
+            
+            <!-- NEW: Aspect Ratio Selector -->
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1 text-left">
+                    Aspect Ratio Shape
+                </label>
+                <select id="ratio-select" class="w-full bg-gray-800 border border-gray-600 text-white rounded-lg p-3 outline-none focus:border-blue-500">
+                    <option value="fill">Fill Entire Screen (9:16)</option>
+                    <option value="1 / 1">1:1 (Perfect Square)</option>
+                    <option value="3 / 4" selected>3:4 (Slight Portrait)</option>
+                    <option value="4 / 3">4:3 (Landscape Box)</option>
+                </select>
+            </div>
+
             <div>
                 <label class="block text-sm font-medium text-gray-300 mb-1 flex justify-between">
                     <span>Zoom</span>
@@ -97,7 +108,7 @@
                     <span>Eye Separation (IPD)</span>
                     <span id="ipd-val">0</span>
                 </label>
-                <input type="range" id="ipd-slider" min="-50" max="50" step="1" value="0" class="w-full">
+                <input type="range" id="ipd-slider" min="-100" max="100" step="1" value="0" class="w-full">
             </div>
 
             <div class="flex flex-col space-y-3 pt-4">
@@ -133,6 +144,7 @@
         const vrContainer = document.getElementById('vr-container');
         
         const settingsUi = document.getElementById('settings-ui');
+        const ratioSelect = document.getElementById('ratio-select');
         const zoomSlider = document.getElementById('zoom-slider');
         const zoomVal = document.getElementById('zoom-val');
         const ipdSlider = document.getElementById('ipd-slider');
@@ -149,7 +161,6 @@
         let currentZoom = 1.0;
         let currentIpd = 0;
 
-        // Force exact dimensions to prevent mobile browser URL bar bugs
         function resizeContainer() {
             if (!vrContainer.classList.contains('hidden')) {
                 vrContainer.style.height = window.innerHeight + 'px';
@@ -157,37 +168,53 @@
             }
         }
 
-        // Listen for screen rotations or window resizing to recalculate size
         window.addEventListener('resize', resizeContainer);
         window.addEventListener('orientationchange', () => {
-            setTimeout(resizeContainer, 100); // Slight delay to let browser UI settle
+            setTimeout(resizeContainer, 100); 
         });
 
-        // Function to update video transformations (Zoom, IPD, and Flip)
+        // Function to apply the selected Aspect Ratio (3:4, 1:1, etc)
+        function applyAspectRatio(ratio) {
+            if (ratio === 'fill') {
+                leftEye.style.width = '100%';
+                leftEye.style.height = '100%';
+                leftEye.style.aspectRatio = 'auto';
+                
+                rightEye.style.width = '100%';
+                rightEye.style.height = '100%';
+                rightEye.style.aspectRatio = 'auto';
+            } else {
+                // By making width auto and height 100%, the aspect-ratio CSS 
+                // calculates the width naturally, keeping it perfectly centered.
+                leftEye.style.width = 'auto';
+                leftEye.style.height = '100%';
+                leftEye.style.aspectRatio = ratio;
+                
+                rightEye.style.width = 'auto';
+                rightEye.style.height = '100%';
+                rightEye.style.aspectRatio = ratio;
+            }
+        }
+
         function updateVideoTransforms() {
             let scaleX = useFrontCamera ? -1 : 1;
-            // Left eye shifts left (-ipd), right eye shifts right (+ipd)
             leftEye.style.transform = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${-currentIpd}px)`;
             rightEye.style.transform = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${currentIpd}px)`;
         }
 
-        // Function to start the camera stream
         async function startCamera() {
-            // Attempt fullscreen IMMEDIATELY upon button click. 
             if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
-                document.documentElement.requestFullscreen().catch(err => console.log("Fullscreen ignored:", err));
+                document.documentElement.requestFullscreen().catch(err => console.log(err));
             }
-            
-            // Try to force landscape orientation
             if (screen.orientation && screen.orientation.lock) {
-                screen.orientation.lock('landscape').catch(err => console.log("Orientation lock ignored:", err));
+                screen.orientation.lock('landscape').catch(err => console.log(err));
             }
 
-            // Stop existing stream if switching
             if (currentStream) {
                 currentStream.getTracks().forEach(track => track.stop());
             }
 
+            // Ask for high res to ensure clean cropping
             const constraints = {
                 video: {
                     facingMode: useFrontCamera ? "user" : "environment",
@@ -197,22 +224,19 @@
             };
 
             try {
-                // Request camera access
                 currentStream = await navigator.mediaDevices.getUserMedia(constraints);
                 
-                // Feed the stream to both video elements
                 leftEye.srcObject = currentStream;
                 rightEye.srcObject = currentStream;
 
-                // Hide the UI and show the VR split screen
                 startUi.classList.add('hidden');
                 vrContainer.classList.remove('hidden');
                 vrContainer.style.display = 'flex';
 
-                // Force layout recalculation to fill screen
                 resizeContainer();
-
-                // Apply initial dynamic transformations
+                
+                // Initialize Default aspect ratio (3:4) and transforms
+                applyAspectRatio(ratioSelect.value);
                 updateVideoTransforms();
 
             } catch (err) {
@@ -221,7 +245,6 @@
             }
         }
 
-        // Event Listeners
         startBtn.addEventListener('click', startCamera);
         
         switchBtn.addEventListener('click', () => {
@@ -229,23 +252,24 @@
             startBtn.innerText = useFrontCamera ? "Start Camera (Front)" : "Start Camera (Rear)";
         });
 
-        // --- Settings Menu Logic ---
+        // --- Settings Menu Listeners ---
 
-        // Zoom control
+        ratioSelect.addEventListener('change', (e) => {
+            applyAspectRatio(e.target.value);
+        });
+
         zoomSlider.addEventListener('input', (e) => {
             currentZoom = parseFloat(e.target.value);
             zoomVal.innerText = currentZoom.toFixed(1) + 'x';
             updateVideoTransforms();
         });
 
-        // IPD (Eye Distance) control
         ipdSlider.addEventListener('input', (e) => {
             currentIpd = parseInt(e.target.value);
             ipdVal.innerText = currentIpd;
             updateVideoTransforms();
         });
 
-        // Fullscreen toggle
         fullscreenBtn.addEventListener('click', () => {
             if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
                 document.documentElement.requestFullscreen().then(() => resizeContainer()).catch(err => console.error(err));
@@ -254,19 +278,16 @@
             }
         });
 
-        // Close Settings menu and resume VR
         closeSettingsBtn.addEventListener('click', () => {
             settingsUi.classList.add('hidden');
             settingsUi.classList.remove('flex');
             
-            // Re-assert fullscreen in case user dropped out of it
             if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
                 document.documentElement.requestFullscreen().then(() => resizeContainer()).catch(err => console.log(err));
             }
             resizeContainer();
         });
 
-        // Completely exit VR mode and turn off camera
         exitVrBtn.addEventListener('click', () => {
             if (document.fullscreenElement && document.exitFullscreen) {
                 document.exitFullscreen().catch(err => console.log(err));
@@ -277,10 +298,8 @@
             
             settingsUi.classList.add('hidden');
             settingsUi.classList.remove('flex');
-            
             vrContainer.classList.add('hidden');
             vrContainer.style.display = 'none';
-            
             startUi.classList.remove('hidden');
             
             if (currentStream) {
@@ -289,7 +308,6 @@
             }
         });
 
-        // Tap the VR screen to open the hidden settings menu
         vrContainer.addEventListener('click', () => {
             settingsUi.classList.remove('hidden');
             settingsUi.classList.add('flex');
