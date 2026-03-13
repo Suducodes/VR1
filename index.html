@@ -10,7 +10,7 @@
             margin: 0;
             padding: 0;
             width: 100%;
-            height: 100%;
+            height: 100dvh; /* Using dynamic viewport height */
             background-color: #000;
             overflow: hidden; /* Prevent scrolling */
             touch-action: none; /* Prevents pull-to-refresh on mobile */
@@ -19,16 +19,17 @@
         /* Container for the split view */
         #vr-container {
             display: none; /* Hidden until camera starts */
-            position: fixed; /* Using fixed ensures it ignores mobile URL bar height bugs */
+            position: fixed; 
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
-            width: 100%;
-            height: 100%;
+            width: 100vw;
+            height: 100dvh; /* Dynamic viewport height fallback */
             display: flex;
             flex-direction: row;
             align-items: stretch;
+            background-color: #000;
         }
 
         /* Each eye takes up exactly half */
@@ -148,6 +149,20 @@
         let currentZoom = 1.0;
         let currentIpd = 0;
 
+        // Force exact dimensions to prevent mobile browser URL bar bugs
+        function resizeContainer() {
+            if (!vrContainer.classList.contains('hidden')) {
+                vrContainer.style.height = window.innerHeight + 'px';
+                vrContainer.style.width = window.innerWidth + 'px';
+            }
+        }
+
+        // Listen for screen rotations or window resizing to recalculate size
+        window.addEventListener('resize', resizeContainer);
+        window.addEventListener('orientationchange', () => {
+            setTimeout(resizeContainer, 100); // Slight delay to let browser UI settle
+        });
+
         // Function to update video transformations (Zoom, IPD, and Flip)
         function updateVideoTransforms() {
             let scaleX = useFrontCamera ? -1 : 1;
@@ -159,12 +174,11 @@
         // Function to start the camera stream
         async function startCamera() {
             // Attempt fullscreen IMMEDIATELY upon button click. 
-            // Browsers block this if it happens after an 'await' operation!
             if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
                 document.documentElement.requestFullscreen().catch(err => console.log("Fullscreen ignored:", err));
             }
             
-            // Try to force landscape orientation (Supported mostly on Android Chrome)
+            // Try to force landscape orientation
             if (screen.orientation && screen.orientation.lock) {
                 screen.orientation.lock('landscape').catch(err => console.log("Orientation lock ignored:", err));
             }
@@ -194,6 +208,9 @@
                 startUi.classList.add('hidden');
                 vrContainer.classList.remove('hidden');
                 vrContainer.style.display = 'flex';
+
+                // Force layout recalculation to fill screen
+                resizeContainer();
 
                 // Apply initial dynamic transformations
                 updateVideoTransforms();
@@ -231,9 +248,9 @@
         // Fullscreen toggle
         fullscreenBtn.addEventListener('click', () => {
             if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-                document.documentElement.requestFullscreen().catch(err => console.error(err));
+                document.documentElement.requestFullscreen().then(() => resizeContainer()).catch(err => console.error(err));
             } else if (document.exitFullscreen) {
-                document.exitFullscreen();
+                document.exitFullscreen().then(() => resizeContainer());
             }
         });
 
@@ -244,8 +261,9 @@
             
             // Re-assert fullscreen in case user dropped out of it
             if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-                document.documentElement.requestFullscreen().catch(err => console.log(err));
+                document.documentElement.requestFullscreen().then(() => resizeContainer()).catch(err => console.log(err));
             }
+            resizeContainer();
         });
 
         // Completely exit VR mode and turn off camera
