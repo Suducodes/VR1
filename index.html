@@ -100,7 +100,7 @@
                 <select id="camera-select" class="w-full bg-gray-800 border border-gray-600 text-white rounded-lg p-3 outline-none focus:border-blue-500">
                     <option value="">Auto-select (Front/Rear)</option>
                 </select>
-                <p class="text-[10px] text-gray-400 mt-1 text-left">Select 'Ultrawide' here if available.</p>
+                <p class="text-[10px] text-gray-400 mt-1 text-left">Try every lens! Browsers often hide the Ultrawide as "Camera 2" or "Camera 0".</p>
             </div>
 
             <!-- Hardware Zoom Slider -->
@@ -406,20 +406,22 @@
                 currentStream.getTracks().forEach(track => track.stop());
             }
 
-            const constraints = {
-                video: {
-                    width: { ideal: 1920 }, 
-                    height: { ideal: 1080 },
-                    frameRate: { ideal: 60 } 
-                }
-            };
+            let videoConstraints = {};
 
-            // Respect specific camera selection, otherwise fallback to front/rear toggle
             if (cameraSelect.value) {
-                constraints.video.deviceId = { exact: cameraSelect.value };
+                // EXTREMELY IMPORTANT: If a specific physical lens (like Ultrawide) is selected,
+                // do NOT force 60 FPS or strict 1080p, as many ultrawide lenses will reject those 
+                // constraints and fail to load in the browser.
+                videoConstraints.deviceId = { exact: cameraSelect.value };
+                videoConstraints.width = { ideal: 1920 }; // Suggest 1080p, but don't force it
             } else {
-                constraints.video.facingMode = useFrontCamera ? "user" : "environment";
+                // If auto-selecting, we can safely ask for high framerate
+                videoConstraints.facingMode = useFrontCamera ? "user" : "environment";
+                videoConstraints.width = { ideal: 1920 }; 
+                videoConstraints.frameRate = { ideal: 60 };
             }
+
+            const constraints = { video: videoConstraints };
 
             try {
                 currentStream = await navigator.mediaDevices.getUserMedia(constraints);
