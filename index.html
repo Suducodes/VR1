@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>VR SBS Camera Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- MediaPipe Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
     <style>
         body, html {
             margin: 0;
@@ -47,12 +52,18 @@
             border-right: none;
         }
 
-        video {
+        video, canvas.pose-overlay {
             max-width: 100%;
             max-height: 100%;
             object-fit: cover !important; 
             transition: transform 0.1s ease-out; 
             transform-origin: center center;
+            position: absolute;
+        }
+
+        canvas.pose-overlay {
+            pointer-events: none; /* Let touches pass through to open the menu */
+            z-index: 10;
         }
         
         input[type=range] {
@@ -82,7 +93,7 @@
         
         <div class="w-full max-w-xs space-y-6">
             
-            <!-- NEW: Aspect Ratio Selector -->
+            <!-- Aspect Ratio Selector -->
             <div>
                 <label class="block text-sm font-medium text-gray-300 mb-1 text-left">
                     Aspect Ratio Shape
@@ -111,6 +122,18 @@
                 <input type="range" id="ipd-slider" min="-100" max="100" step="1" value="0" class="w-full">
             </div>
 
+            <!-- Body Tracking Toggle -->
+            <div class="flex items-center justify-between border-t border-gray-700 pt-4 mt-2">
+                <label class="block text-sm font-medium text-gray-300">
+                    Enable Body Tracking (AI)
+                </label>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="tracking-toggle" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                </label>
+            </div>
+            <div id="tracking-status" class="text-xs text-yellow-400 hidden text-center">Downloading ML Model... Please wait.</div>
+
             <div class="flex flex-col space-y-3 pt-4">
                 <button id="fullscreen-btn" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow">
                     Toggle Full Screen
@@ -131,9 +154,11 @@
     <div id="vr-container" class="hidden">
         <div class="eye">
             <video id="left-eye" autoplay playsinline></video>
+            <canvas id="left-canvas" class="pose-overlay"></canvas>
         </div>
         <div class="eye">
             <video id="right-eye" autoplay playsinline></video>
+            <canvas id="right-canvas" class="pose-overlay"></canvas>
         </div>
     </div>
 
@@ -153,13 +178,25 @@
         const closeSettingsBtn = document.getElementById('close-settings-btn');
         const exitVrBtn = document.getElementById('exit-vr-btn');
         
+        const trackingToggle = document.getElementById('tracking-toggle');
+        const trackingStatus = document.getElementById('tracking-status');
+        
         const leftEye = document.getElementById('left-eye');
         const rightEye = document.getElementById('right-eye');
+        const leftCanvas = document.getElementById('left-canvas');
+        const rightCanvas = document.getElementById('right-canvas');
+        const leftCtx = leftCanvas.getContext('2d');
+        const rightCtx = rightCanvas.getContext('2d');
 
         let currentStream = null;
         let useFrontCamera = false;
         let currentZoom = 1.0;
         let currentIpd = 0;
+
+        // --- MediaPipe Variables ---
+        let isTracking = false;
+        let poseModel = null;
+        let poseActive = false;
 
         function resizeContainer() {
             if (!vrContainer.classList.contains('hidden')) {
@@ -173,34 +210,124 @@
             setTimeout(resizeContainer, 100); 
         });
 
-        // Function to apply the selected Aspect Ratio (3:4, 1:1, etc)
+        // Apply aspect ratio to BOTH videos and AI canvases
         function applyAspectRatio(ratio) {
-            if (ratio === 'fill') {
-                leftEye.style.width = '100%';
-                leftEye.style.height = '100%';
-                leftEye.style.aspectRatio = 'auto';
+            const elements = [leftEye, rightEye, leftCanvas, rightCanvas];
+            
+            elements.forEach(el => {
+                if (ratio === 'fill') {
+                    el.style.width = '100%';
+                    el.style.height = '100%';
+                    el.style.aspectRatio = 'auto';
+                } else {
+                    el.style.width = 'auto';
+                    el.style.height = '100%';
+                    el.style.aspectRatio = ratio;
+                }
+            });
+        }
+
+        // Apply visual transforms to BOTH videos and AI canvases
+        function updateVideoTransforms() {
+            let scaleX = useFrontCamera ? -1 : 1;
+            let transformStringLeft = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${-currentIpd}px)`;
+            let transformStringRight = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${currentIpd}px)`;
+            
+            leftEye.style.transform = transformStringLeft;
+            leftCanvas.style.transform = transformStringLeft;
+            
+            rightEye.style.transform = transformStringRight;
+            rightCanvas.style.transform = transformStringRight;
+        }
+
+        // --- MediaPipe Logic ---
+
+        function initMediaPipe() {
+            if (poseModel) return;
+            trackingStatus.classList.remove('hidden');
+
+            poseModel = new Pose({locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+            }});
+            
+            poseModel.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                enableSegmentation: false,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+            
+            poseModel.onResults(onPoseResults);
+        }
+
+        function onPoseResults(results) {
+            if (!isTracking) return;
+
+            trackingStatus.classList.add('hidden'); // Hide loading message
+
+            // Ensure canvas coordinate space exactly matches the video source resolution
+            if(leftCanvas.width !== leftEye.videoWidth) {
+                leftCanvas.width = leftEye.videoWidth;
+                leftCanvas.height = leftEye.videoHeight;
+                rightCanvas.width = rightEye.videoWidth;
+                rightCanvas.height = rightEye.videoHeight;
+            }
+
+            leftCtx.save();
+            leftCtx.clearRect(0, 0, leftCanvas.width, leftCanvas.height);
+            rightCtx.save();
+            rightCtx.clearRect(0, 0, rightCanvas.width, rightCanvas.height);
+
+            if (results.poseLandmarks) {
+                // Draw Left Eye Overlay
+                drawConnectors(leftCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                drawLandmarks(leftCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
                 
-                rightEye.style.width = '100%';
-                rightEye.style.height = '100%';
-                rightEye.style.aspectRatio = 'auto';
-            } else {
-                // By making width auto and height 100%, the aspect-ratio CSS 
-                // calculates the width naturally, keeping it perfectly centered.
-                leftEye.style.width = 'auto';
-                leftEye.style.height = '100%';
-                leftEye.style.aspectRatio = ratio;
-                
-                rightEye.style.width = 'auto';
-                rightEye.style.height = '100%';
-                rightEye.style.aspectRatio = ratio;
+                // Draw Right Eye Overlay
+                drawConnectors(rightCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                drawLandmarks(rightCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
+            }
+            
+            leftCtx.restore();
+            rightCtx.restore();
+        }
+
+        async function processVideoFrame() {
+            if (!isTracking || !currentStream || leftEye.paused || leftEye.readyState < 2) {
+                poseActive = false;
+                leftCtx.clearRect(0, 0, leftCanvas.width, leftCanvas.height);
+                rightCtx.clearRect(0, 0, rightCanvas.width, rightCanvas.height);
+                return;
+            }
+
+            poseActive = true;
+            try {
+                await poseModel.send({image: leftEye});
+            } catch(e) {
+                console.error("MediaPipe Error:", e);
+            }
+            
+            if (isTracking) {
+                requestAnimationFrame(processVideoFrame);
             }
         }
 
-        function updateVideoTransforms() {
-            let scaleX = useFrontCamera ? -1 : 1;
-            leftEye.style.transform = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${-currentIpd}px)`;
-            rightEye.style.transform = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${currentIpd}px)`;
-        }
+        trackingToggle.addEventListener('change', (e) => {
+            isTracking = e.target.checked;
+            if(isTracking) {
+                initMediaPipe();
+                if(!poseActive && currentStream && leftEye.readyState >= 2) {
+                    requestAnimationFrame(processVideoFrame);
+                }
+            } else {
+                trackingStatus.classList.add('hidden');
+                leftCtx.clearRect(0, 0, leftCanvas.width, leftCanvas.height);
+                rightCtx.clearRect(0, 0, rightCanvas.width, rightCanvas.height);
+            }
+        });
+
+        // --- Camera Logic ---
 
         async function startCamera() {
             if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
@@ -214,12 +341,11 @@
                 currentStream.getTracks().forEach(track => track.stop());
             }
 
-            // Ask for high res to ensure clean cropping
             const constraints = {
                 video: {
                     facingMode: useFrontCamera ? "user" : "environment",
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 }
+                    width: { ideal: 1280 }, // Slightly reduced from 1920 to ensure smoother ML processing on phones
+                    height: { ideal: 720 }
                 }
             };
 
@@ -234,10 +360,15 @@
                 vrContainer.style.display = 'flex';
 
                 resizeContainer();
-                
-                // Initialize Default aspect ratio (3:4) and transforms
                 applyAspectRatio(ratioSelect.value);
                 updateVideoTransforms();
+
+                // Wait for video to be ready, then start ML tracking if enabled
+                leftEye.onloadeddata = () => {
+                    if(isTracking && poseModel && !poseActive) {
+                        requestAnimationFrame(processVideoFrame);
+                    }
+                };
 
             } catch (err) {
                 console.error("Error accessing the camera: ", err);
@@ -245,14 +376,14 @@
             }
         }
 
+        // --- UI Listeners ---
+
         startBtn.addEventListener('click', startCamera);
         
         switchBtn.addEventListener('click', () => {
             useFrontCamera = !useFrontCamera;
             startBtn.innerText = useFrontCamera ? "Start Camera (Front)" : "Start Camera (Rear)";
         });
-
-        // --- Settings Menu Listeners ---
 
         ratioSelect.addEventListener('change', (e) => {
             applyAspectRatio(e.target.value);
@@ -306,8 +437,10 @@
                 currentStream.getTracks().forEach(track => track.stop());
                 currentStream = null;
             }
+            poseActive = false; // Pause tracking
         });
 
+        // Tap the VR screen to open the hidden settings menu
         vrContainer.addEventListener('click', () => {
             settingsUi.classList.remove('hidden');
             settingsUi.classList.add('flex');
