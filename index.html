@@ -36,7 +36,6 @@
             background-color: #000;
         }
 
-        /* Flexbox centers the video if we constrain the aspect ratio */
         .eye {
             flex: 1; 
             height: 100%;
@@ -62,7 +61,7 @@
         }
 
         canvas.pose-overlay {
-            pointer-events: none; /* Let touches pass through to open the menu */
+            pointer-events: none; 
             z-index: 10;
         }
         
@@ -88,10 +87,31 @@
     </div>
 
     <!-- Settings UI overlay (Hidden initially) -->
-    <div id="settings-ui" class="hidden absolute z-50 flex-col items-center justify-center bg-black/95 w-full h-full p-6 text-center">
-        <h2 class="text-2xl font-bold mb-6">VR Settings</h2>
+    <div id="settings-ui" class="hidden absolute z-50 flex-col items-center justify-start bg-black/95 w-full h-full p-6 text-center overflow-y-auto pb-12">
+        <h2 class="text-2xl font-bold mb-6 mt-4 shrink-0">VR Settings</h2>
         
-        <div class="w-full max-w-xs space-y-6">
+        <div class="w-full max-w-xs space-y-6 mx-auto pb-6">
+            
+            <!-- Lens Selection Dropdown -->
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1 text-left">
+                    Physical Camera Lens
+                </label>
+                <select id="camera-select" class="w-full bg-gray-800 border border-gray-600 text-white rounded-lg p-3 outline-none focus:border-blue-500">
+                    <option value="">Auto-select (Front/Rear)</option>
+                </select>
+                <p class="text-[10px] text-gray-400 mt-1 text-left">Select 'Ultrawide' here if available.</p>
+            </div>
+
+            <!-- Hardware Zoom Slider -->
+            <div class="border-b border-gray-700 pb-4">
+                <label class="block text-sm font-medium text-blue-400 mb-1 flex justify-between">
+                    <span>Hardware Lens Zoom</span>
+                    <span id="hw-zoom-val">1.0x</span>
+                </label>
+                <input type="range" id="hw-zoom-slider" min="0.5" max="5" step="0.1" value="1" class="w-full" disabled>
+                <p class="text-[10px] text-gray-400 mt-1 text-left">Optical/Digital zoom. (Slider disabled if browser blocks API).</p>
+            </div>
             
             <!-- Aspect Ratio Selector -->
             <div>
@@ -106,15 +126,17 @@
                 </select>
             </div>
 
+            <!-- Visual Scale (CSS Zoom) -->
             <div>
                 <label class="block text-sm font-medium text-gray-300 mb-1 flex justify-between">
-                    <span>Zoom</span>
+                    <span>Visual Screen Size</span>
                     <span id="zoom-val">1.0x</span>
                 </label>
-                <!-- Updated minimum zoom to 0.5 to allow ultra-wide field of view -->
-                <input type="range" id="zoom-slider" min="0.5" max="5" step="0.1" value="1" class="w-full">
+                <input type="range" id="zoom-slider" min="0.5" max="3" step="0.1" value="1" class="w-full">
+                <p class="text-[10px] text-gray-400 mt-1 text-left">Shrinks/grows the video box to align with your VR lenses.</p>
             </div>
             
+            <!-- IPD -->
             <div>
                 <label class="block text-sm font-medium text-gray-300 mb-1 flex justify-between">
                     <span>Eye Separation (IPD)</span>
@@ -135,7 +157,8 @@
             </div>
             <div id="tracking-status" class="text-xs text-yellow-400 hidden text-center">Downloading ML Model... Please wait.</div>
 
-            <div class="flex flex-col space-y-3 pt-4">
+            <!-- Action Buttons -->
+            <div class="flex flex-col space-y-3 pt-4 shrink-0">
                 <button id="fullscreen-btn" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow">
                     Toggle Full Screen
                 </button>
@@ -170,8 +193,11 @@
         const vrContainer = document.getElementById('vr-container');
         
         const settingsUi = document.getElementById('settings-ui');
+        const cameraSelect = document.getElementById('camera-select');
+        const hwZoomSlider = document.getElementById('hw-zoom-slider');
+        const hwZoomVal = document.getElementById('hw-zoom-val');
         const ratioSelect = document.getElementById('ratio-select');
-        const zoomSlider = document.getElementById('zoom-slider');
+        const zoomSlider = document.getElementById('zoom-slider'); // Now used for CSS scaling
         const zoomVal = document.getElementById('zoom-val');
         const ipdSlider = document.getElementById('ipd-slider');
         const ipdVal = document.getElementById('ipd-val');
@@ -191,7 +217,7 @@
 
         let currentStream = null;
         let useFrontCamera = false;
-        let currentZoom = 1.0;
+        let currentCssScale = 1.0;
         let currentIpd = 0;
 
         // --- MediaPipe Variables ---
@@ -211,6 +237,30 @@
             setTimeout(resizeContainer, 100); 
         });
 
+        // Populate physical camera lenses into the dropdown
+        async function populateCameraDevices() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoInputs = devices.filter(device => device.kind === 'videoinput');
+                
+                const currentSelection = cameraSelect.value;
+                cameraSelect.innerHTML = '<option value="">Auto-select (Front/Rear)</option>';
+                
+                videoInputs.forEach((device, index) => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    // Provide a fallback name if the browser hides labels (happens before permissions are granted)
+                    option.text = device.label || `Camera Device ${index + 1}`;
+                    if (device.deviceId === currentSelection) {
+                        option.selected = true;
+                    }
+                    cameraSelect.appendChild(option);
+                });
+            } catch (err) {
+                console.error("Could not enumerate devices:", err);
+            }
+        }
+
         // Apply aspect ratio to BOTH videos and AI canvases
         function applyAspectRatio(ratio) {
             const elements = [leftEye, rightEye, leftCanvas, rightCanvas];
@@ -228,11 +278,11 @@
             });
         }
 
-        // Apply visual transforms to BOTH videos and AI canvases
+        // Apply visual CSS transforms (Scale and IPD translation)
         function updateVideoTransforms() {
-            let scaleX = useFrontCamera ? -1 : 1;
-            let transformStringLeft = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${-currentIpd}px)`;
-            let transformStringRight = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${currentIpd}px)`;
+            let scaleX = useFrontCamera && !cameraSelect.value ? -1 : 1; 
+            let transformStringLeft = `scale(${currentCssScale * scaleX}, ${currentCssScale}) translateX(${-currentIpd}px)`;
+            let transformStringRight = `scale(${currentCssScale * scaleX}, ${currentCssScale}) translateX(${currentIpd}px)`;
             
             leftEye.style.transform = transformStringLeft;
             leftCanvas.style.transform = transformStringLeft;
@@ -241,8 +291,27 @@
             rightCanvas.style.transform = transformStringRight;
         }
 
-        // --- MediaPipe Logic ---
+        // Setup Hardware Zoom Capabilities
+        function setupHardwareZoom(track) {
+            if (track.getCapabilities) {
+                const capabilities = track.getCapabilities();
+                const settings = track.getSettings();
+                
+                if (capabilities.zoom) {
+                    hwZoomSlider.disabled = false;
+                    hwZoomSlider.min = capabilities.zoom.min || 0.5;
+                    hwZoomSlider.max = capabilities.zoom.max || 5;
+                    hwZoomSlider.step = capabilities.zoom.step || 0.1;
+                    hwZoomSlider.value = settings.zoom || 1.0;
+                    hwZoomVal.innerText = parseFloat(hwZoomSlider.value).toFixed(1) + 'x';
+                } else {
+                    hwZoomSlider.disabled = true;
+                    hwZoomVal.innerText = 'Not Supported';
+                }
+            }
+        }
 
+        // --- MediaPipe Logic ---
         function initMediaPipe() {
             if (poseModel) return;
             trackingStatus.classList.remove('hidden');
@@ -264,10 +333,8 @@
 
         function onPoseResults(results) {
             if (!isTracking) return;
+            trackingStatus.classList.add('hidden'); 
 
-            trackingStatus.classList.add('hidden'); // Hide loading message
-
-            // Ensure canvas coordinate space exactly matches the video source resolution
             if(leftCanvas.width !== leftEye.videoWidth) {
                 leftCanvas.width = leftEye.videoWidth;
                 leftCanvas.height = leftEye.videoHeight;
@@ -281,11 +348,9 @@
             rightCtx.clearRect(0, 0, rightCanvas.width, rightCanvas.height);
 
             if (results.poseLandmarks) {
-                // Draw Left Eye Overlay
                 drawConnectors(leftCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
                 drawLandmarks(leftCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
                 
-                // Draw Right Eye Overlay
                 drawConnectors(rightCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
                 drawLandmarks(rightCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
             }
@@ -329,7 +394,6 @@
         });
 
         // --- Camera Logic ---
-
         async function startCamera() {
             if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
                 document.documentElement.requestFullscreen().catch(err => console.log(err));
@@ -342,19 +406,27 @@
                 currentStream.getTracks().forEach(track => track.stop());
             }
 
-            // Safer high-quality constraints (removed strict max/min and advanced features that block mobile browsers)
             const constraints = {
                 video: {
-                    facingMode: useFrontCamera ? "user" : "environment",
                     width: { ideal: 1920 }, 
                     height: { ideal: 1080 },
                     frameRate: { ideal: 60 } 
                 }
             };
 
+            // Respect specific camera selection, otherwise fallback to front/rear toggle
+            if (cameraSelect.value) {
+                constraints.video.deviceId = { exact: cameraSelect.value };
+            } else {
+                constraints.video.facingMode = useFrontCamera ? "user" : "environment";
+            }
+
             try {
                 currentStream = await navigator.mediaDevices.getUserMedia(constraints);
                 
+                // Fetch the list of lenses now that permissions are definitely granted
+                await populateCameraDevices();
+
                 leftEye.srcObject = currentStream;
                 rightEye.srcObject = currentStream;
 
@@ -365,8 +437,8 @@
                 resizeContainer();
                 applyAspectRatio(ratioSelect.value);
                 updateVideoTransforms();
+                setupHardwareZoom(currentStream.getVideoTracks()[0]);
 
-                // Wait for video to be ready, then start ML tracking if enabled
                 leftEye.onloadeddata = () => {
                     if(isTracking && poseModel && !poseActive) {
                         requestAnimationFrame(processVideoFrame);
@@ -375,17 +447,38 @@
 
             } catch (err) {
                 console.error("Error accessing the camera: ", err);
-                alert("Camera error: " + err.message + "\n\nThis usually means the browser rejected the camera settings. Please ensure permissions are granted and try reloading.");
+                alert("Camera error: " + err.message + "\n\nEnsure permissions are granted.");
             }
         }
 
         // --- UI Listeners ---
-
         startBtn.addEventListener('click', startCamera);
         
         switchBtn.addEventListener('click', () => {
+            cameraSelect.value = ""; // Reset explicit device ID to allow facingMode to work
             useFrontCamera = !useFrontCamera;
             startBtn.innerText = useFrontCamera ? "Start Camera (Front)" : "Start Camera (Rear)";
+        });
+
+        // Restart camera stream if physical lens is changed
+        cameraSelect.addEventListener('change', () => {
+            if (!vrContainer.classList.contains('hidden')) {
+                startCamera();
+            }
+        });
+
+        // Send hardware zoom commands
+        hwZoomSlider.addEventListener('input', async (e) => {
+            const val = parseFloat(e.target.value);
+            hwZoomVal.innerText = val.toFixed(1) + 'x';
+            if (currentStream) {
+                const track = currentStream.getVideoTracks()[0];
+                try {
+                    await track.applyConstraints({ advanced: [{ zoom: val }] });
+                } catch (err) {
+                    console.error("Failed to apply hardware zoom", err);
+                }
+            }
         });
 
         ratioSelect.addEventListener('change', (e) => {
@@ -393,8 +486,8 @@
         });
 
         zoomSlider.addEventListener('input', (e) => {
-            currentZoom = parseFloat(e.target.value);
-            zoomVal.innerText = currentZoom.toFixed(1) + 'x';
+            currentCssScale = parseFloat(e.target.value);
+            zoomVal.innerText = currentCssScale.toFixed(1) + 'x';
             updateVideoTransforms();
         });
 
@@ -440,10 +533,9 @@
                 currentStream.getTracks().forEach(track => track.stop());
                 currentStream = null;
             }
-            poseActive = false; // Pause tracking
+            poseActive = false; 
         });
 
-        // Tap the VR screen to open the hidden settings menu
         vrContainer.addEventListener('click', () => {
             settingsUi.classList.remove('hidden');
             settingsUi.classList.add('flex');
