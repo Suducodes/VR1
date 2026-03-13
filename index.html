@@ -10,7 +10,460 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 
+    <style><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VR SBS Camera Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- MediaPipe Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
     <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100dvh; 
+            background-color: #000;
+            overflow: hidden; 
+            touch-action: none; 
+        }
+
+        #vr-container {
+            display: none; 
+            position: fixed; 
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100vw;
+            height: 100dvh; 
+            display: flex;
+            flex-direction: row;
+            align-items: stretch;
+            background-color: #000;
+        }
+
+        /* Flexbox centers the video if we constrain the aspect ratio */
+        .eye {
+            flex: 1; 
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            border-right: 2px solid #111; 
+        }
+
+        .eye:last-child {
+            border-right: none;
+        }
+
+        video, canvas.pose-overlay {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: cover !important; 
+            transition: transform 0.1s ease-out; 
+            transform-origin: center center;
+            position: absolute;
+        }
+
+        canvas.pose-overlay {
+            pointer-events: none; /* Let touches pass through to open the menu */
+            z-index: 10;
+        }
+        
+        input[type=range] {
+            accent-color: #3b82f6;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center font-sans text-white">
+
+    <!-- Start UI overlay -->
+    <div id="start-ui" class="absolute z-50 flex flex-col items-center justify-center bg-black/80 w-full h-full p-6 text-center">
+        <h1 class="text-3xl font-bold mb-4">VR Camera Viewer</h1>
+        <p class="text-gray-400 mb-8 max-w-md">Place your phone in a VR headset. Tap the button below to allow camera access and start the side-by-side stream.</p>
+        
+        <button id="start-btn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-8 rounded-full shadow-lg transition-all transform hover:scale-105">
+            Start Camera (Rear)
+        </button>
+
+        <button id="switch-btn" class="mt-4 text-sm text-gray-500 underline hover:text-white">
+            Switch to Front Camera
+        </button>
+    </div>
+
+    <!-- Settings UI overlay (Hidden initially) -->
+    <div id="settings-ui" class="hidden absolute z-50 flex-col items-center justify-center bg-black/95 w-full h-full p-6 text-center">
+        <h2 class="text-2xl font-bold mb-6">VR Settings</h2>
+        
+        <div class="w-full max-w-xs space-y-6">
+            
+            <!-- Aspect Ratio Selector -->
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1 text-left">
+                    Aspect Ratio Shape
+                </label>
+                <select id="ratio-select" class="w-full bg-gray-800 border border-gray-600 text-white rounded-lg p-3 outline-none focus:border-blue-500">
+                    <option value="fill">Fill Entire Screen (9:16)</option>
+                    <option value="1 / 1">1:1 (Perfect Square)</option>
+                    <option value="3 / 4" selected>3:4 (Slight Portrait)</option>
+                    <option value="4 / 3">4:3 (Landscape Box)</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1 flex justify-between">
+                    <span>Zoom</span>
+                    <span id="zoom-val">1.0x</span>
+                </label>
+                <!-- Updated minimum zoom to 0.5 to allow ultra-wide field of view -->
+                <input type="range" id="zoom-slider" min="0.5" max="5" step="0.1" value="1" class="w-full">
+            </div>
+            
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1 flex justify-between">
+                    <span>Eye Separation (IPD)</span>
+                    <span id="ipd-val">0</span>
+                </label>
+                <input type="range" id="ipd-slider" min="-100" max="100" step="1" value="0" class="w-full">
+            </div>
+
+            <!-- Body Tracking Toggle -->
+            <div class="flex items-center justify-between border-t border-gray-700 pt-4 mt-2">
+                <label class="block text-sm font-medium text-gray-300">
+                    Enable Body Tracking (AI)
+                </label>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="tracking-toggle" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                </label>
+            </div>
+            <div id="tracking-status" class="text-xs text-yellow-400 hidden text-center">Downloading ML Model... Please wait.</div>
+
+            <div class="flex flex-col space-y-3 pt-4">
+                <button id="fullscreen-btn" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow">
+                    Toggle Full Screen
+                </button>
+                
+                <button id="close-settings-btn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-lg shadow">
+                    Resume VR
+                </button>
+
+                <button id="exit-vr-btn" class="bg-red-900 hover:bg-red-800 text-white font-bold py-3 px-6 rounded-lg shadow mt-2">
+                    Exit VR
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dual Camera Viewers -->
+    <div id="vr-container" class="hidden">
+        <div class="eye">
+            <video id="left-eye" autoplay playsinline></video>
+            <canvas id="left-canvas" class="pose-overlay"></canvas>
+        </div>
+        <div class="eye">
+            <video id="right-eye" autoplay playsinline></video>
+            <canvas id="right-canvas" class="pose-overlay"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const startBtn = document.getElementById('start-btn');
+        const switchBtn = document.getElementById('switch-btn');
+        const startUi = document.getElementById('start-ui');
+        const vrContainer = document.getElementById('vr-container');
+        
+        const settingsUi = document.getElementById('settings-ui');
+        const ratioSelect = document.getElementById('ratio-select');
+        const zoomSlider = document.getElementById('zoom-slider');
+        const zoomVal = document.getElementById('zoom-val');
+        const ipdSlider = document.getElementById('ipd-slider');
+        const ipdVal = document.getElementById('ipd-val');
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        const closeSettingsBtn = document.getElementById('close-settings-btn');
+        const exitVrBtn = document.getElementById('exit-vr-btn');
+        
+        const trackingToggle = document.getElementById('tracking-toggle');
+        const trackingStatus = document.getElementById('tracking-status');
+        
+        const leftEye = document.getElementById('left-eye');
+        const rightEye = document.getElementById('right-eye');
+        const leftCanvas = document.getElementById('left-canvas');
+        const rightCanvas = document.getElementById('right-canvas');
+        const leftCtx = leftCanvas.getContext('2d');
+        const rightCtx = rightCanvas.getContext('2d');
+
+        let currentStream = null;
+        let useFrontCamera = false;
+        let currentZoom = 1.0;
+        let currentIpd = 0;
+
+        // --- MediaPipe Variables ---
+        let isTracking = false;
+        let poseModel = null;
+        let poseActive = false;
+
+        function resizeContainer() {
+            if (!vrContainer.classList.contains('hidden')) {
+                vrContainer.style.height = window.innerHeight + 'px';
+                vrContainer.style.width = window.innerWidth + 'px';
+            }
+        }
+
+        window.addEventListener('resize', resizeContainer);
+        window.addEventListener('orientationchange', () => {
+            setTimeout(resizeContainer, 100); 
+        });
+
+        // Apply aspect ratio to BOTH videos and AI canvases
+        function applyAspectRatio(ratio) {
+            const elements = [leftEye, rightEye, leftCanvas, rightCanvas];
+            
+            elements.forEach(el => {
+                if (ratio === 'fill') {
+                    el.style.width = '100%';
+                    el.style.height = '100%';
+                    el.style.aspectRatio = 'auto';
+                } else {
+                    el.style.width = 'auto';
+                    el.style.height = '100%';
+                    el.style.aspectRatio = ratio;
+                }
+            });
+        }
+
+        // Apply visual transforms to BOTH videos and AI canvases
+        function updateVideoTransforms() {
+            let scaleX = useFrontCamera ? -1 : 1;
+            let transformStringLeft = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${-currentIpd}px)`;
+            let transformStringRight = `scale(${currentZoom * scaleX}, ${currentZoom}) translateX(${currentIpd}px)`;
+            
+            leftEye.style.transform = transformStringLeft;
+            leftCanvas.style.transform = transformStringLeft;
+            
+            rightEye.style.transform = transformStringRight;
+            rightCanvas.style.transform = transformStringRight;
+        }
+
+        // --- MediaPipe Logic ---
+
+        function initMediaPipe() {
+            if (poseModel) return;
+            trackingStatus.classList.remove('hidden');
+
+            poseModel = new Pose({locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+            }});
+            
+            poseModel.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                enableSegmentation: false,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+            
+            poseModel.onResults(onPoseResults);
+        }
+
+        function onPoseResults(results) {
+            if (!isTracking) return;
+
+            trackingStatus.classList.add('hidden'); // Hide loading message
+
+            // Ensure canvas coordinate space exactly matches the video source resolution
+            if(leftCanvas.width !== leftEye.videoWidth) {
+                leftCanvas.width = leftEye.videoWidth;
+                leftCanvas.height = leftEye.videoHeight;
+                rightCanvas.width = rightEye.videoWidth;
+                rightCanvas.height = rightEye.videoHeight;
+            }
+
+            leftCtx.save();
+            leftCtx.clearRect(0, 0, leftCanvas.width, leftCanvas.height);
+            rightCtx.save();
+            rightCtx.clearRect(0, 0, rightCanvas.width, rightCanvas.height);
+
+            if (results.poseLandmarks) {
+                // Draw Left Eye Overlay
+                drawConnectors(leftCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                drawLandmarks(leftCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
+                
+                // Draw Right Eye Overlay
+                drawConnectors(rightCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                drawLandmarks(rightCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
+            }
+            
+            leftCtx.restore();
+            rightCtx.restore();
+        }
+
+        async function processVideoFrame() {
+            if (!isTracking || !currentStream || leftEye.paused || leftEye.readyState < 2) {
+                poseActive = false;
+                leftCtx.clearRect(0, 0, leftCanvas.width, leftCanvas.height);
+                rightCtx.clearRect(0, 0, rightCanvas.width, rightCanvas.height);
+                return;
+            }
+
+            poseActive = true;
+            try {
+                await poseModel.send({image: leftEye});
+            } catch(e) {
+                console.error("MediaPipe Error:", e);
+            }
+            
+            if (isTracking) {
+                requestAnimationFrame(processVideoFrame);
+            }
+        }
+
+        trackingToggle.addEventListener('change', (e) => {
+            isTracking = e.target.checked;
+            if(isTracking) {
+                initMediaPipe();
+                if(!poseActive && currentStream && leftEye.readyState >= 2) {
+                    requestAnimationFrame(processVideoFrame);
+                }
+            } else {
+                trackingStatus.classList.add('hidden');
+                leftCtx.clearRect(0, 0, leftCanvas.width, leftCanvas.height);
+                rightCtx.clearRect(0, 0, rightCanvas.width, rightCanvas.height);
+            }
+        });
+
+        // --- Camera Logic ---
+
+        async function startCamera() {
+            if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => console.log(err));
+            }
+            if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock('landscape').catch(err => console.log(err));
+            }
+
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            // High-quality constraints for 1080p, 60fps, and continuous autofocus 
+            const constraints = {
+                video: {
+                    facingMode: useFrontCamera ? "user" : "environment",
+                    width: { ideal: 1920, max: 3840 }, 
+                    height: { ideal: 1080, max: 2160 },
+                    frameRate: { ideal: 60, min: 30 }, // Dramatically reduces motion blur
+                    advanced: [{ focusMode: "continuous" }] // Keeps camera sharp
+                }
+            };
+
+            try {
+                currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                
+                leftEye.srcObject = currentStream;
+                rightEye.srcObject = currentStream;
+
+                startUi.classList.add('hidden');
+                vrContainer.classList.remove('hidden');
+                vrContainer.style.display = 'flex';
+
+                resizeContainer();
+                applyAspectRatio(ratioSelect.value);
+                updateVideoTransforms();
+
+                // Wait for video to be ready, then start ML tracking if enabled
+                leftEye.onloadeddata = () => {
+                    if(isTracking && poseModel && !poseActive) {
+                        requestAnimationFrame(processVideoFrame);
+                    }
+                };
+
+            } catch (err) {
+                console.error("Error accessing the camera: ", err);
+                alert("Could not access the camera. Please make sure you have granted permission.");
+            }
+        }
+
+        // --- UI Listeners ---
+
+        startBtn.addEventListener('click', startCamera);
+        
+        switchBtn.addEventListener('click', () => {
+            useFrontCamera = !useFrontCamera;
+            startBtn.innerText = useFrontCamera ? "Start Camera (Front)" : "Start Camera (Rear)";
+        });
+
+        ratioSelect.addEventListener('change', (e) => {
+            applyAspectRatio(e.target.value);
+        });
+
+        zoomSlider.addEventListener('input', (e) => {
+            currentZoom = parseFloat(e.target.value);
+            zoomVal.innerText = currentZoom.toFixed(1) + 'x';
+            updateVideoTransforms();
+        });
+
+        ipdSlider.addEventListener('input', (e) => {
+            currentIpd = parseInt(e.target.value);
+            ipdVal.innerText = currentIpd;
+            updateVideoTransforms();
+        });
+
+        fullscreenBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().then(() => resizeContainer()).catch(err => console.error(err));
+            } else if (document.exitFullscreen) {
+                document.exitFullscreen().then(() => resizeContainer());
+            }
+        });
+
+        closeSettingsBtn.addEventListener('click', () => {
+            settingsUi.classList.add('hidden');
+            settingsUi.classList.remove('flex');
+            
+            if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().then(() => resizeContainer()).catch(err => console.log(err));
+            }
+            resizeContainer();
+        });
+
+        exitVrBtn.addEventListener('click', () => {
+            if (document.fullscreenElement && document.exitFullscreen) {
+                document.exitFullscreen().catch(err => console.log(err));
+            }
+            if (screen.orientation && screen.orientation.unlock) {
+                screen.orientation.unlock();
+            }
+            
+            settingsUi.classList.add('hidden');
+            settingsUi.classList.remove('flex');
+            vrContainer.classList.add('hidden');
+            vrContainer.style.display = 'none';
+            startUi.classList.remove('hidden');
+            
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+                currentStream = null;
+            }
+            poseActive = false; // Pause tracking
+        });
+
+        // Tap the VR screen to open the hidden settings menu
+        vrContainer.addEventListener('click', () => {
+            settingsUi.classList.remove('hidden');
+            settingsUi.classList.add('flex');
+        });
+    </script>
+</body>
+</html>
         body, html {
             margin: 0;
             padding: 0;
@@ -448,3 +901,4 @@
     </script>
 </body>
 </html>
+
