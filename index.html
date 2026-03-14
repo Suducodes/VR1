@@ -316,32 +316,34 @@ body::after {
 
 
 /* ─── SPLIT SCREEN ───────────────────────────────── */
-#split-canvas {
+#split-overlay {
   position: fixed;
   top: 0; left: 0;
   width: 100vw; height: 100vh;
-  pointer-events: none;
-  z-index: 10;
   display: none;
+  z-index: 10;
 }
 
+#split-overlay.active { display: flex; }
+
+#split-left, #split-right {
+  width: 50%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#split-right { transform: scaleX(-1); }
+
 #split-divider {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 50%;
   transform: translateX(-50%);
   width: 2px;
-  height: 100vh;
+  height: 100%;
   background: linear-gradient(to bottom, transparent, var(--cyan), var(--magenta), var(--cyan), transparent);
   box-shadow: 0 0 12px var(--cyan);
-  z-index: 400;
-  display: none;
   pointer-events: none;
-}
-
-body.split-mode a-scene {
-  width: 50vw !important;
-  clip-path: inset(0 50% 0 0);
 }
 
 /* ─── VR BUTTON ──────────────────────────────────── */
@@ -466,10 +468,12 @@ body.split-mode a-scene {
   </div>
 </div>
 
-<!-- SPLIT SCREEN MIRROR CANVAS -->
-<canvas id="split-canvas"></canvas>
-<!-- CENTER DIVIDER LINE -->
-<div id="split-divider"></div>
+<!-- SPLIT SCREEN -->
+<div id="split-overlay">
+  <video id="split-left"  autoplay muted playsinline></video>
+  <video id="split-right" autoplay muted playsinline></video>
+  <div id="split-divider"></div>
+</div>
 
 
 <canvas id="hand-canvas"></canvas>
@@ -808,7 +812,53 @@ window.addEventListener('camera-error', () => {
   stepAR.style.color = '#ff2d78';
 });
 
-/* ── Boot ──────────────────────────────────────── */
+/* ── Split Screen ──────────────────────────────── */
+const splitOverlay = document.getElementById('split-overlay');
+const splitLeft    = document.getElementById('split-left');
+const splitRight   = document.getElementById('split-right');
+const splitBtn     = document.getElementById('split-btn');
+let splitMode = false;
+
+function toggleSplit() {
+  splitMode = !splitMode;
+
+  if (splitMode) {
+    // Find the A-Frame canvas — it's always the first canvas in the scene
+    const aCanvas = document.querySelector('a-scene canvas') 
+                 || document.querySelector('canvas');
+
+    if (!aCanvas) {
+      alert('Scene not ready yet, try again in a second.');
+      splitMode = false;
+      return;
+    }
+
+    try {
+      const stream = aCanvas.captureStream(30);
+      splitLeft.srcObject  = stream;
+      splitRight.srcObject = stream; // same stream, CSS mirrors the right side
+      splitLeft.play();
+      splitRight.play();
+    } catch(e) {
+      console.error('captureStream failed:', e);
+    }
+
+    splitOverlay.classList.add('active');
+    splitBtn.style.background = 'rgba(255,215,0,0.15)';
+    splitBtn.style.boxShadow  = '0 0 25px rgba(255,215,0,0.4)';
+
+  } else {
+    splitOverlay.classList.remove('active');
+    splitLeft.srcObject  = null;
+    splitRight.srcObject = null;
+    splitBtn.style.background = '';
+    splitBtn.style.boxShadow  = '';
+  }
+}
+
+window.toggleSplit = toggleSplit;
+
+
 initAI();
 findVideo();
 </script>
