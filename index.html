@@ -315,6 +315,35 @@ body::after {
 
 
 
+/* ─── SPLIT SCREEN ───────────────────────────────── */
+#split-canvas {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  pointer-events: none;
+  z-index: 10;
+  display: none;
+}
+
+#split-divider {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  height: 100vh;
+  background: linear-gradient(to bottom, transparent, var(--cyan), var(--magenta), var(--cyan), transparent);
+  box-shadow: 0 0 12px var(--cyan);
+  z-index: 400;
+  display: none;
+  pointer-events: none;
+}
+
+body.split-mode a-scene {
+  width: 50vw !important;
+  clip-path: inset(0 50% 0 0);
+}
+
 /* ─── VR BUTTON ──────────────────────────────────── */
 .vr-btn {
   pointer-events: all;
@@ -437,7 +466,12 @@ body::after {
   </div>
 </div>
 
-<!-- HAND SKELETON CANVAS -->
+<!-- SPLIT SCREEN MIRROR CANVAS -->
+<canvas id="split-canvas"></canvas>
+<!-- CENTER DIVIDER LINE -->
+<div id="split-divider"></div>
+
+
 <canvas id="hand-canvas"></canvas>
 
 <!-- CENTER RETICLE -->
@@ -478,14 +512,12 @@ body::after {
       <div class="status-dot"></div>
       <div class="status-text" id="status-text">Awaiting Signal</div>
     </div>
-    <button id="vr-btn" class="vr-btn">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M2 8h20v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8z"/>
-        <circle cx="8.5" cy="13" r="2"/>
-        <circle cx="15.5" cy="13" r="2"/>
-        <line x1="12" y1="13" x2="12" y2="13"/>
+    <button id="split-btn" class="vr-btn" onclick="toggleSplit()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="4" width="9" height="16" rx="2"/>
+        <rect x="13" y="4" width="9" height="16" rx="2"/>
       </svg>
-      CARDBOARD VR
+      SPLIT SCREEN
     </button>
     <div class="instruction-bar">Point at HIRO marker · Wave hand to rotate model</div>
   </div>
@@ -502,7 +534,7 @@ body::after {
 <a-scene
   embedded
   arjs="sourceType: webcam; debugUIEnabled: false; trackingMethod: best;"
-  vr-mode-ui="enabled: true; enterVRButton: #vr-btn"
+  vr-mode-ui="enabled: false"
   renderer="antialias: true; colorManagement: true;"
   gltf-model="dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/;">
 
