@@ -197,11 +197,11 @@
 
     <!-- 
       A-FRAME AR SCENE 
-      Notice sourceWidth and sourceHeight: This forces the highest un-cropped wide angle available!
+      Removed strict camera resolution constraints to guarantee camera activates on all devices.
     -->
     <a-scene 
         embedded 
-        arjs="sourceType: webcam; sourceWidth:1280; sourceHeight:960; displayWidth: 1280; displayHeight: 960; debugUIEnabled: false; trackingMethod: best;" 
+        arjs="sourceType: webcam; debugUIEnabled: false; trackingMethod: best;" 
         vr-mode-ui="enabled: false"
         renderer="antialias: true; colorManagement: true;"
         gltf-model="dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/;">
@@ -273,10 +273,17 @@
         // 2. Connect AI to the hidden AR.js Camera Feed
         function findVideoFeed() {
             const video = document.querySelector('video');
-            if (video && video.readyState >= 2) { 
-                predictWebcam(video); 
-            } else if (video) { 
-                video.addEventListener('loadeddata', () => predictWebcam(video)); 
+            if (video) { 
+                // Force mobile browsers to respect the video feed
+                video.setAttribute('playsinline', '');
+                video.setAttribute('autoplay', '');
+                video.setAttribute('muted', '');
+
+                if (video.readyState >= 2) {
+                    predictWebcam(video); 
+                } else {
+                    video.addEventListener('loadeddata', () => predictWebcam(video)); 
+                }
             } else { 
                 setTimeout(findVideoFeed, 500); 
             }
