@@ -3,434 +3,343 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Bio-Vision VR Split Screen</title>
+    <title>Bio-Vision | Medical AR</title>
+
+    <!-- 1. Import A-Frame (3D Engine) -->
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
     
-    <!-- Import Three.js for 3D Rendering -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    
-    <!-- Import DeviceOrientationControls to make the object stick to the room -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/DeviceOrientationControls.js"></script>
-    
-    <!-- IMPORT GLTFLoader to load your MRI heart models -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-    
-    <!-- Import MediaPipe Tasks Vision for Hand Tracking -->
+    <!-- 2. Import AR.js (Marker Tracking) -->
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+
+    <!-- 3. Import MediaPipe (Hand Tracking) -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs" type="module"></script>
 
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100vw;
-            height: 100vh;
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: 'Inter', sans-serif; 
             background-color: #000;
-            overflow: hidden;
+        }
+
+        /* --- Professional Medical UI --- */
+        #ui-layer {
+            position: absolute; 
+            top: 0; left: 0; 
+            width: 100vw; height: 100vh;
+            pointer-events: none; /* Let touches pass through to 3D scene */
+            z-index: 100; 
             display: flex;
-            font-family: sans-serif;
+            flex-direction: column; 
+            justify-content: space-between;
+            padding: 5vh 5vw; 
+            box-sizing: border-box;
         }
 
-        /* The hidden video element that the AI actually looks at */
-        #hidden-video {
-            display: none;
+        /* Frosted Glass Header */
+        .header {
+            background: rgba(10, 25, 47, 0.6); 
+            color: #ffffff; 
+            padding: 20px;
+            border-radius: 16px; 
+            text-align: center; 
+            border: 1px solid rgba(0, 255, 204, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
         }
 
-        /* The Split Screen Container */
-        #vr-container {
-            display: flex;
-            width: 100%;
-            height: 100%;
+        .header h1 {
+            margin: 0; 
+            font-size: 1.5rem; 
+            font-weight: 800;
+            letter-spacing: 1px;
+            color: #00ffcc;
+            text-transform: uppercase;
         }
 
-        /* Left and Right Eye Views */
-        .eye {
-            flex: 1;
-            position: relative;
-            overflow: hidden;
-            border-right: 2px solid #222; /* Line down the middle */
+        .header p {
+            margin: 8px 0 0 0; 
+            font-size: 0.85rem; 
+            color: #8892b0; 
+            font-weight: 600;
         }
 
-        /* The Webcam feed duplicated for each eye */
-        .webcam-feed {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%) scaleX(-1); /* Mirrored like a selfie */
-            min-width: 100%;
-            min-height: 100%;
-            object-fit: cover;
-            z-index: 1;
-        }
-
-        /* The 3D Canvas overlaid on top of the webcam */
-        .three-canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 2;
-            pointer-events: none; /* Let touches pass through to video */
-        }
-
-        /* Neon Lines Canvas */
-        .overlay-canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 1.5; /* Between video and 3D heart */
-            pointer-events: none;
-        }
-
-        /* Loading Overlay */
-        #loading {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: rgba(0,0,0,0.8);
-            color: #00ff88;
+        /* Animated Status Pill */
+        .status-container {
             display: flex;
             justify-content: center;
-            align-items: center;
-            z-index: 999;
-            font-size: 1.5rem;
-            flex-direction: column;
+            width: 100%;
         }
 
-        #start-btn {
-            margin-top: 20px;
-            padding: 15px 30px;
-            font-size: 1.2rem;
-            background: #00ff88;
-            color: #000;
-            border: none;
-            border-radius: 25px;
-            cursor: pointer;
-            display: none; /* Hidden until loaded */
+        .status {
+            background: rgba(10, 25, 47, 0.8); 
+            color: #00ffcc; 
+            padding: 12px 24px;
+            border-radius: 30px; 
+            text-align: center; 
+            font-weight: 600;
+            font-size: 0.9rem;
+            border: 1px solid rgba(0, 255, 204, 0.5);
+            box-shadow: 0 0 15px rgba(0, 255, 204, 0.2);
+            backdrop-filter: blur(4px);
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
+
+        .status.active {
+            background: rgba(0, 255, 204, 0.15);
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.4);
+        }
+
+        .status-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background-color: #ff3366;
+            box-shadow: 0 0 8px #ff3366;
+            animation: pulse-dot 1.5s infinite;
+        }
+
+        .status.active .status-dot {
+            background-color: #00ffcc;
+            box-shadow: 0 0 8px #00ffcc;
+        }
+
+        @keyframes pulse-dot {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        /* Target Crosshair Overlay */
+        .crosshair {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 250px; height: 250px;
+            border: 2px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            pointer-events: none;
+            z-index: 50;
+        }
+        .crosshair::after {
+            content: ''; position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); width: 10px; height: 10px;
+            background: rgba(0, 255, 204, 0.5); border-radius: 50%;
+        }
+
+        /* --- Sleek Loading Screen --- */
+        #loading {
+            position: absolute; 
+            top: 0; left: 0; 
+            width: 100vw; height: 100vh;
+            background: #0a192f; 
+            display: flex; 
+            flex-direction: column;
+            justify-content: center; 
+            align-items: center; 
+            z-index: 999; 
+            transition: opacity 0.5s ease;
+        }
+
+        .loader {
+            width: 60px; height: 60px;
+            border-radius: 50%;
+            border: 3px solid transparent;
+            border-top-color: #00ffcc;
+            animation: spin 1s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
+            margin-bottom: 20px;
+        }
+
+        .loader::before {
+            content: ""; position: absolute; top: 5px; left: 5px; right: 5px; bottom: 5px;
+            border-radius: 50%; border: 3px solid transparent; border-top-color: #ff3366;
+            animation: spin 2s linear infinite;
+        }
+
+        @keyframes spin { 
+            0% { transform: rotate(0deg); } 
+            100% { transform: rotate(360deg); } 
+        }
+
+        .loading-text { color: #ccd6f6; font-size: 1.2rem; font-weight: 600; letter-spacing: 1px;}
+        .loading-subtext { color: #8892b0; font-size: 0.9rem; margin-top: 10px; }
+
     </style>
 </head>
 <body>
 
     <!-- Loading Screen -->
     <div id="loading">
-        <div id="status-text">Loading Bio-Vision AI...</div>
-        <button id="start-btn">Tap to Start VR</button>
+        <div class="loader"></div>
+        <div class="loading-text">INITIALIZING BIO-VISION</div>
+        <div class="loading-subtext">Calibrating AR & Hand Tracking Core...</div>
     </div>
 
-    <!-- Hidden Video for Processing -->
-    <video id="hidden-video" autoplay playsinline></video>
-
-    <!-- The VR Split Screen UI -->
-    <div id="vr-container">
-        <div class="eye">
-            <video class="webcam-feed" autoplay playsinline></video>
-            <canvas id="overlay-left" class="overlay-canvas"></canvas>
-            <canvas id="canvas-left" class="three-canvas"></canvas>
+    <!-- UI Overlay -->
+    <div class="crosshair"></div>
+    <div id="ui-layer">
+        <div class="header">
+            <h1>Bio-Vision</h1>
+            <p>Spatial Gesture Interface v1.0</p>
         </div>
-        <div class="eye">
-            <video class="webcam-feed" autoplay playsinline></video>
-            <canvas id="overlay-right" class="overlay-canvas"></canvas>
-            <canvas id="canvas-right" class="three-canvas"></canvas>
+        <div class="status-container">
+            <div id="ai-status" class="status">
+                <div class="status-dot"></div>
+                <span>Scanning for Hand...</span>
+            </div>
         </div>
     </div>
 
+    <!-- 
+      A-FRAME AR SCENE 
+      Notice sourceWidth and sourceHeight: This forces the highest un-cropped wide angle available!
+    -->
+    <a-scene 
+        embedded 
+        arjs="sourceType: webcam; sourceWidth:1280; sourceHeight:960; displayWidth: 1280; displayHeight: 960; debugUIEnabled: false; trackingMethod: best;" 
+        vr-mode-ui="enabled: false"
+        renderer="antialias: true; colorManagement: true;"
+        gltf-model="dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/;">
+        
+        <a-assets>
+            <!-- Pre-load compressed MRI model -->
+            <a-asset-item id="my-heart" src="heart_compressed.glb"></a-asset-item>
+        </a-assets>
+
+        <!-- Hiro Marker Anchor -->
+        <a-marker preset="hiro" smooth="true" smoothCount="5" smoothTolerance="0.01" smoothThreshold="2">
+            <!-- 
+               HEART CONTAINER
+               We rotate this empty container using the AI, which smoothly spins the model inside it.
+            -->
+            <a-entity id="heart-container" position="0 0.5 0">
+                <a-gltf-model src="#my-heart" scale="1.5 1.5 1.5" animation-mixer></a-gltf-model>
+            </a-entity>
+        </a-marker>
+        
+        <a-entity camera></a-entity>
+    </a-scene>
+
+    <!-- MAIN AI LOGIC -->
     <script type="module">
         import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs";
 
-        const video = document.getElementById("hidden-video");
-        const displayVideos = document.querySelectorAll(".webcam-feed");
-        const startBtn = document.getElementById("start-btn");
         const loadingScreen = document.getElementById("loading");
-        const statusText = document.getElementById("status-text");
+        const statusTextSpan = document.querySelector("#ai-status span");
+        const statusPill = document.getElementById("ai-status");
+        const heartContainer = document.getElementById("heart-container");
 
         let handLandmarker;
-        let runningMode = "VIDEO";
         let lastVideoTime = -1;
+        
+        // Advanced Smoothing Variables
+        let smoothX = 0; 
+        let smoothY = 0;
+        let isHandPresent = false;
+        let lostHandTimeout = null;
 
-        // TRACKBALL VARIABLES: For smooth, swipe-based spinning
-        let prevWristX = null;
-        let prevWristY = null;
-        let heartVelocityX = 0;
-        let heartVelocityY = 0;
-
-        // GYROSCOPE VARIABLES: To anchor the object in the room
-        let controlsLeft, controlsRight;
-
-        // Hand skeleton connections for the neon lines
-        const HAND_CONNECTIONS = [
-            [0, 1], [1, 2], [2, 3], [3, 4], // Thumb
-            [0, 5], [5, 6], [6, 7], [7, 8], // Index
-            [5, 9], [9, 10], [10, 11], [11, 12], // Middle
-            [9, 13], [13, 14], [14, 15], [15, 16], // Ring
-            [13, 17], [0, 17], [17, 18], [18, 19], [19, 20] // Pinky & Palm
-        ];
-
-        // Setup 2D Canvases for Neon Lines
-        const overlayLeft = document.getElementById("overlay-left");
-        const ctxLeft = overlayLeft.getContext("2d");
-        const overlayRight = document.getElementById("overlay-right");
-        const ctxRight = overlayRight.getContext("2d");
-
-        // ---------------------------------------------------------
-        // 1. THREE.JS SETUP WITH GLTF LOADER
-        // ---------------------------------------------------------
-        function setupThreeJS(canvasId) {
-            const canvas = document.getElementById(canvasId);
-            const renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
-            
-            const width = canvas.clientWidth;
-            const height = canvas.clientHeight;
-            renderer.setSize(width, height, false);
-
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-            camera.position.z = 5;
-
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-            scene.add(ambientLight);
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
-            dirLight.position.set(0, 5, 5);
-            scene.add(dirLight);
-
-            // Create a container so we can easily swap the placeholder with the real heart
-            const heartContainer = new THREE.Group();
-            scene.add(heartContainer);
-
-            // Placeholder "Heart" (Red TorusKnot)
-            const geometry = new THREE.TorusKnotGeometry(0.8, 0.3, 100, 16);
-            const material = new THREE.MeshPhongMaterial({ color: 0xff3333, shininess: 100 });
-            const placeholder = new THREE.Mesh(geometry, material);
-            heartContainer.add(placeholder);
-
-            // --- LOAD YOUR CUSTOM MRI HEART MODEL HERE ---
-            const loader = new THREE.GLTFLoader();
-            
-            // TODO: Uncomment the code below once your model is compressed and pushed to github
-            /*
-            loader.load('YOUR_MODEL_HERE.glb', function (gltf) {
-                // 1. Remove the placeholder red knot
-                heartContainer.remove(placeholder);
-                
-                const actualHeart = gltf.scene;
-
-                // 2. Auto-scale medical models (they are usually imported huge or tiny)
-                const box = new THREE.Box3().setFromObject(actualHeart);
-                const size = box.getSize(new THREE.Vector3()).length();
-                const center = box.getCenter(new THREE.Vector3());
-                
-                actualHeart.position.x += (actualHeart.position.x - center.x);
-                actualHeart.position.y += (actualHeart.position.y - center.y);
-                actualHeart.position.z += (actualHeart.position.z - center.z);
-                
-                const scale = 3.0 / size; // Change this number to make it bigger/smaller
-                actualHeart.scale.set(scale, scale, scale);
-
-                // 3. Add real heart to the scene
-                heartContainer.add(actualHeart);
-            }, undefined, function (error) {
-                console.error('Error loading heart model:', error);
-            });
-            */
-
-            return { renderer, scene, camera, heartContainer };
-        }
-
-        const leftEye3D = setupThreeJS("canvas-left");
-        const rightEye3D = setupThreeJS("canvas-right");
-
-        window.addEventListener('resize', () => {
-            [leftEye3D, rightEye3D].forEach(eye => {
-                const canvas = eye.renderer.domElement;
-                const width = canvas.parentElement.clientWidth;
-                const height = canvas.parentElement.clientHeight;
-                eye.renderer.setSize(width, height, false);
-                eye.camera.aspect = width / height;
-                eye.camera.updateProjectionMatrix();
-            });
-
-            // Resize overlay canvases
-            const eyeWidth = document.querySelector('.eye').clientWidth;
-            const eyeHeight = document.querySelector('.eye').clientHeight;
-            overlayLeft.width = eyeWidth;
-            overlayLeft.height = eyeHeight;
-            overlayRight.width = eyeWidth;
-            overlayRight.height = eyeHeight;
-        });
-
-        // Trigger initial resize to setup canvas dimensions
-        window.dispatchEvent(new Event('resize'));
-
-        // ---------------------------------------------------------
-        // 2. MEDIAPIPE AI SETUP
-        // ---------------------------------------------------------
-        async function initializeHandTracking() {
-            statusText.innerText = "Downloading Hand Tracking Model...";
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-            );
-            
-            handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                baseOptions: {
-                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-                    delegate: "GPU"
-                },
-                runningMode: runningMode,
-                numHands: 1,
-                minHandDetectionConfidence: 0.5,
-                minHandPresenceConfidence: 0.5,
-                minTrackingConfidence: 0.5
-            });
-
-            statusText.innerText = "Ready!";
-            startBtn.style.display = "block";
-        }
-
-        // ---------------------------------------------------------
-        // 3. CAMERA SETUP
-        // ---------------------------------------------------------
-        async function startCamera() {
+        // 1. Initialize Google MediaPipe AI
+        async function initAI() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment", width: 640, height: 480 } 
+                const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: { 
+                        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`, 
+                        delegate: "GPU" 
+                    },
+                    runningMode: "VIDEO", 
+                    numHands: 1,
+                    minHandDetectionConfidence: 0.6,
+                    minTrackingConfidence: 0.6
                 });
                 
-                video.srcObject = stream;
-                displayVideos.forEach(v => v.srcObject = stream);
-
-                video.addEventListener("loadeddata", predictWebcam);
-                loadingScreen.style.display = "none";
-            } catch (err) {
-                console.error(err);
-                statusText.innerText = "Camera Access Denied or Unavailable.";
+                // Fade out loading screen
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => loadingScreen.style.display = "none", 500);
+                
+                findVideoFeed();
+            } catch (error) {
+                console.error("AI Init Error:", error);
+                document.querySelector(".loading-text").innerText = "NETWORK ERROR";
+                document.querySelector(".loading-subtext").innerText = "Please check internet connection.";
             }
         }
 
-        startBtn.addEventListener("click", () => {
-            statusText.innerText = "Starting Camera...";
-            startBtn.style.display = "none";
-            
-            // Request Gyroscope Permission (Required for iPhones/iOS 13+)
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission()
-                    .then(permissionState => {
-                        if (permissionState === 'granted') {
-                            initGyro();
-                        }
-                    })
-                    .catch(console.error);
-            } else {
-                initGyro(); // Auto-enable for standard Android devices
+        // 2. Connect AI to the hidden AR.js Camera Feed
+        function findVideoFeed() {
+            const video = document.querySelector('video');
+            if (video && video.readyState >= 2) { 
+                predictWebcam(video); 
+            } else if (video) { 
+                video.addEventListener('loadeddata', () => predictWebcam(video)); 
+            } else { 
+                setTimeout(findVideoFeed, 500); 
             }
-
-            startCamera();
-        });
-
-        // Initialize Gyroscope connection to the 3D cameras
-        function initGyro() {
-            controlsLeft = new THREE.DeviceOrientationControls(leftEye3D.camera);
-            controlsRight = new THREE.DeviceOrientationControls(rightEye3D.camera);
         }
 
-        // ---------------------------------------------------------
-        // 4. THE MAIN LOOP
-        // ---------------------------------------------------------
-        async function predictWebcam() {
-            // Update cameras to match phone's physical movement in the room
-            if (controlsLeft) controlsLeft.update();
-            if (controlsRight) controlsRight.update();
-
-            const time = Date.now() * 0.005;
-            const scalePulse = 1 + Math.sin(time) * 0.05;
-
-            let currentLandmarks = null;
+        // 3. Main Tracking & Render Loop
+        async function predictWebcam(video) {
+            // Apply a subtle floating/beating pulse to the heart to make it feel "alive"
+            const time = Date.now() * 0.003;
+            const pulse = 1 + Math.sin(time) * 0.015;
+            heartContainer.setAttribute('scale', `${pulse} ${pulse} ${pulse}`);
 
             if (video.currentTime !== lastVideoTime) {
                 lastVideoTime = video.currentTime;
+                
+                // Process current frame
                 const results = handLandmarker.detectForVideo(video, performance.now());
                 
                 if (results.landmarks && results.landmarks.length > 0) {
-                    currentLandmarks = results.landmarks[0];
-                    const wrist = currentLandmarks[0];
-
-                    // TRACKBALL LOGIC: Calculate hand swipe velocity instead of snapping to points
-                    if (prevWristX !== null) {
-                        let dx = wrist.x - prevWristX;
-                        let dy = wrist.y - prevWristY;
-                        heartVelocityX += dy * 0.5;  // Swipe up/down to tilt
-                        heartVelocityY += -dx * 0.5; // Swipe left/right to spin
+                    // Hand is detected
+                    if (!isHandPresent) {
+                        statusTextSpan.innerText = "Tracking Hand...";
+                        statusPill.classList.add("active");
+                        isHandPresent = true;
+                        clearTimeout(lostHandTimeout);
                     }
-                    prevWristX = wrist.x;
-                    prevWristY = wrist.y;
+
+                    // Grab the wrist coordinate (landmark 0)
+                    const wrist = results.landmarks[0][0];
+
+                    // Smooth the movement to remove jitter
+                    smoothX += (wrist.x - smoothX) * 0.15;
+                    smoothY += (wrist.y - smoothY) * 0.15;
+
+                    // Convert hand position to 3D rotation (multiplier controls sensitivity)
+                    const rotX = (smoothY - 0.5) * 180;
+                    const rotY = (smoothX - 0.5) * 180;
+
+                    heartContainer.setAttribute('rotation', `${rotX} ${rotY} 0`);
                 } else {
-                    prevWristX = null;
-                    prevWristY = null;
+                    // Hand is lost
+                    if (isHandPresent) {
+                        isHandPresent = false;
+                        lostHandTimeout = setTimeout(() => {
+                            statusTextSpan.innerText = "Scanning for Hand...";
+                            statusPill.classList.remove("active");
+                        }, 500); // 0.5s delay prevents flickering if AI loses hand for 1 frame
+                    }
+
+                    // Smoothly auto-rotate back to the center if no hand is detected
+                    const currentRot = heartContainer.getAttribute('rotation');
+                    if(currentRot) {
+                        heartContainer.setAttribute('rotation', `${currentRot.x * 0.92} ${currentRot.y * 0.92} 0`);
+                    }
                 }
             }
-
-            // Apply friction so the model smoothly slows down like a physical globe
-            heartVelocityX *= 0.92;
-            heartVelocityY *= 0.92;
-
-            // Apply a tiny auto-spin if no one is touching it
-            if (Math.abs(heartVelocityY) < 0.01 && !currentLandmarks) {
-                heartVelocityY += 0.005;
-            }
-
-            // --- DRAW NEON LINES ---
-            [ctxLeft, ctxRight].forEach(ctx => {
-                const w = ctx.canvas.width;
-                const h = ctx.canvas.height;
-                ctx.clearRect(0, 0, w, h);
-
-                if (currentLandmarks) {
-                    // Set Neon Cyberpunk Style
-                    ctx.strokeStyle = '#00ffcc'; // Neon Cyan
-                    ctx.lineWidth = 3;
-                    ctx.lineCap = 'round';
-                    ctx.shadowBlur = 12;
-                    ctx.shadowColor = '#00ffcc';
-
-                    // Draw bones (lines)
-                    ctx.beginPath();
-                    HAND_CONNECTIONS.forEach(pair => {
-                        const p1 = currentLandmarks[pair[0]];
-                        const p2 = currentLandmarks[pair[1]];
-                        
-                        // We do (1 - x) because the webcam video is mirrored like a selfie!
-                        ctx.moveTo((1 - p1.x) * w, p1.y * h);
-                        ctx.lineTo((1 - p2.x) * w, p2.y * h);
-                    });
-                    ctx.stroke();
-
-                    // Draw joints (white glowing dots)
-                    ctx.fillStyle = '#ffffff';
-                    ctx.shadowBlur = 15;
-                    currentLandmarks.forEach(point => {
-                        ctx.beginPath();
-                        ctx.arc((1 - point.x) * w, point.y * h, 4, 0, 2 * Math.PI);
-                        ctx.fill();
-                    });
-                }
-            });
-
-            [leftEye3D, rightEye3D].forEach(eye => {
-                // Apply our new momentum-based rotation variables
-                eye.heartContainer.rotation.x += heartVelocityX;
-                eye.heartContainer.rotation.y += heartVelocityY;
-                eye.heartContainer.scale.set(scalePulse, scalePulse, scalePulse);
-
-                eye.renderer.render(eye.scene, eye.camera);
-            });
-
-            window.requestAnimationFrame(predictWebcam);
+            
+            // Loop infinitely
+            requestAnimationFrame(() => predictWebcam(video));
         }
 
-        initializeHandTracking();
-
+        // Start the engine
+        initAI();
     </script>
 </body>
 </html>
