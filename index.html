@@ -313,7 +313,35 @@ body::after {
   text-shadow: var(--glow-cyan);
 }
 
-
+/* ─── MARKER HINT ────────────────────────────────── */
+#marker-hint {
+  position:fixed;
+  top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  background: rgba(0,8,24,0.9);
+  border:1px solid rgba(0,255,240,0.3);
+  border-radius:12px;
+  padding:20px 30px;
+  text-align:center;
+  z-index:350;
+  backdrop-filter:blur(16px);
+  max-width:280px;
+  transition: opacity 0.5s;
+}
+#marker-hint h2 {
+  font-family:'Orbitron',monospace;
+  font-size:0.85rem;
+  color:var(--cyan);
+  letter-spacing:3px;
+  margin-bottom:8px;
+}
+#marker-hint p {
+  font-size:0.65rem;
+  color:rgba(255,255,255,0.4);
+  letter-spacing:1px;
+  line-height:1.6;
+}
+#marker-hint.hidden { opacity:0; pointer-events:none; }
 
 /* ─── LOADING ────────────────────────────────────── */
 #loading {
@@ -416,7 +444,11 @@ body::after {
   </div>
 </div>
 
-
+<!-- MARKER HINT -->
+<div id="marker-hint">
+  <h2>POINT CAMERA</h2>
+  <p>Aim at the <strong style="color:var(--cyan)">HIRO marker</strong> to activate the holographic projection</p>
+</div>
 
 <!-- UI LAYER -->
 <div id="ui-layer">
@@ -517,6 +549,7 @@ const lmCount    = document.getElementById('lm-count');
 const hCanvas    = document.getElementById('hand-canvas');
 const hCtx       = hCanvas.getContext('2d');
 const heartCont  = document.getElementById('heart-container');
+const markerHint = document.getElementById('marker-hint');
 const cursor     = document.getElementById('cursor');
 
 /* ── Cursor follow ─────────────────────────────── */
@@ -532,6 +565,14 @@ function resizeCanvas() {
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
+
+/* ── Marker events ─────────────────────────────── */
+document.getElementById('hiro-marker').addEventListener('markerFound', () => {
+  markerHint.classList.add('hidden');
+});
+document.getElementById('hiro-marker').addEventListener('markerLost', () => {
+  setTimeout(() => markerHint.classList.remove('hidden'), 1500);
+});
 
 /* ── State ─────────────────────────────────────── */
 let handLandmarker, lastVideoTime = -1;
